@@ -170,68 +170,135 @@
   <script>
     /**
      * =========================================================
-     * 1. 存储与平台换算配置
+     * 1. 存储、默认软件与动态汇率配置
      * =========================================================
      */
     const STORAGE_KEY = 'schedule_host_record';
 
-    // 各平台换算规则定义
-    const PLATFORM_RULE = {
-      miya: {
-        name: 'Miya',
-        badge: 'bg-blue-50 text-[#0f294a] border-blue-200',
-        ruleText: '魅力值 = 金币 × 0.7 | 马币 = 魅力值 ÷ 180',
-        calc: (coins) => {
-          const charm = coins * 0.7;
-          return { metric: charm, usd: null, myr: charm / 180 };
+    // 默认内置软件配置（保留原有 Miya / Momi / Migo 换算逻辑，且支持用户新增与改汇率）
+    function getDefaultPlatforms() {
+      return [
+        {
+          id: 'miya',
+          name: 'Miya',
+          badge: 'bg-blue-50 text-[#0f294a] border-blue-200',
+          // 魅力值 = 金币 * 0.7，马币 = 魅力值 / 180 => 每1金币约合 (0.7 / 180) 马币
+          myrPerCoin: 0.7 / 180,
+          ruleText: '魅力值 = 金币 × 0.7 | 马币 = 魅力值 ÷ 180',
+          builtin: true
+        },
+        {
+          id: 'momi',
+          name: 'Momi',
+          badge: 'bg-indigo-50 text-[#1e3a5f] border-indigo-200',
+          // 魅力值 = 金币 * 0.7，马币 = 魅力值 / 10000 * 52 => 每1金币约合 (0.7 / 10000 * 52) 马币
+          myrPerCoin: (0.7 / 10000) * 52,
+          ruleText: '魅力值 = 金币 × 0.7 | 马币 = 魅力值 ÷ 10000 × 52',
+          builtin: true
+        },
+        {
+          id: 'migo',
+          name: 'Migo',
+          badge: 'bg-sky-50 text-[#0f294a] border-sky-200',
+          // 礼物值 = 金币 * 2.8，美元 = 礼物值 / 40000，马币 = 美元 * usdToMyr
+          mode: 'migo_usd',
+          myrPerCoin: null,
+          ruleText: '礼物值 = 金币 × 2.8 | 美元 = 礼物值 ÷ 40000 | 马币 = 美元 × 汇率',
+          builtin: true
         }
-      },
-      momi: {
-        name: 'Momi',
-        badge: 'bg-indigo-50 text-[#1e3a5f] border-indigo-200',
-        ruleText: '魅力值 = 金币 × 0.7 | 马币 = 魅力值 ÷ 10000 × 52',
-        calc: (coins) => {
-          const charm = coins * 0.7;
-          return { metric: charm, usd: null, myr: (charm / 10000) * 52 };
-        }
-      },
-      migo: {
-        name: 'Migo',
-        badge: 'bg-sky-50 text-[#0f294a] border-sky-200',
-        ruleText: '礼物值 = 金币 × 2.8 | 美元 = 礼物值 ÷ 40000 | 马币 = 美元 × 汇率',
-        calc: (coins, globalCfg) => {
-          const gift = coins * 2.8;
-          const usd = gift / 40000;
-          const rate = Number(globalCfg?.usdToMyr) || 4.6;
-          return { metric: gift, usd, myr: usd * rate };
-        }
+      ];
+    }
+
+    function getPlatformById(platformId) {
+      const found = data.platforms.find(p => p.id === platformId);
+      if (found) return found;
+      return data.platforms[0] || getDefaultPlatforms()[0];
+    }
+
+    function getPlatformRuleText(p, globalCfg) {
+      if (!p) return '';
+      if (p.mode === 'migo_usd') {
+        const rate = Number(globalCfg?.usdToMyr) || 4.6;
+        return `礼物值 = 金币 × 2.8 | 美元 = 礼物值 ÷ 40000 | 马币 = 美元 × ${rate}`;
       }
-    };
+      const rate = Number(p.myrPerCoin) || 0;
+      if (p.ruleText && !p.customRateEdited) return p.ruleText;
+      return `换算率：1 金币 = ${rate.toFixed(6)} MYR`;
+    }
+
+    function calcCoinsToMyr(coins, platformId, globalCfg) {
+      const p = getPlatformById(platformId);
+      const safeCoins = Number(coins) || 0;
+      if (p && p.mode === 'migo_usd') {
+        const gift = safeCoins * 2.8;
+        const usd = gift / 40000;
+        const rate = Number(globalCfg?.usdToMyr) || 4.6;
+        return usd * rate;
+      }
+      const rate = Number(p?.myrPerCoin) || 0;
+      return safeCoins * rate;
+    }
 
     // 加载并校验本地数据，兼容旧结构
     function loadData() {
+      const fallback = {
+        venues: [],
+        global: { usdToMyr: 4.6 },
+        platforms: getDefaultPlatforms()
+      };
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) {
-          return { venues: [], global: { usdToMyr: 4.6 } };
-        }
+        if (!raw) return fallback;
         const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object') {
-          return { venues: [], global: { usdToMyr: 4.6 } };
-        }
+        if (!parsed || typeof parsed !== 'object') return fallback;
+
         if (!Array.isArray(parsed.venues)) parsed.venues = [];
         if (!parsed.global || typeof parsed.global.usdToMyr !== 'number' || isNaN(parsed.global.usdToMyr)) {
           parsed.global = { usdToMyr: 4.6 };
         }
+
+        // 合并并校验 platforms
+        if (!Array.isArray(parsed.platforms) || parsed.platforms.length === 0) {
+          parsed.platforms = getDefaultPlatforms();
+        } else {
+          const defaults = getDefaultPlatforms();
+          defaults.forEach(def => {
+            const exists = parsed.platforms.find(x => x.id === def.id);
+            if (!exists) {
+              parsed.platforms.unshift(def);
+            } else {
+              if (!exists.name) exists.name = def.name;
+              if (!exists.badge) exists.badge = def.badge;
+              if (def.mode === 'migo_usd') {
+                exists.mode = 'migo_usd';
+              } else if (typeof exists.myrPerCoin !== 'number' || isNaN(exists.myrPerCoin)) {
+                exists.myrPerCoin = def.myrPerCoin;
+              }
+            }
+          });
+          parsed.platforms.forEach(p => {
+            if (!p.id) p.id = uuid();
+            if (!p.name) p.name = '未命名软件';
+            if (!p.badge) p.badge = 'bg-slate-100 text-[#0f294a] border-slate-300';
+            if (p.mode !== 'migo_usd' && (typeof p.myrPerCoin !== 'number' || isNaN(p.myrPerCoin))) {
+              p.myrPerCoin = 0;
+            }
+          });
+        }
+
+        const validIds = new Set(parsed.platforms.map(p => p.id));
         parsed.venues.forEach(v => {
           if (!Array.isArray(v.scheduleList)) v.scheduleList = [];
           if (!Array.isArray(v.hostList)) v.hostList = [];
-          if (!PLATFORM_RULE[v.platform]) v.platform = 'miya';
+          if (!validIds.has(v.platform)) {
+            v.platform = parsed.platforms[0]?.id || 'miya';
+          }
         });
+
         return parsed;
       } catch (err) {
         console.error('读取本地数据异常:', err);
-        return { venues: [], global: { usdToMyr: 4.6 } };
+        return fallback;
       }
     }
 
@@ -311,9 +378,7 @@
     }
 
     /**
-     * 计算单条主持记录的时长（小时）与金币：
-     * - 若记录包含 hours 字段（例如小时格打卡或自定义时长），优先使用 hours
-     * - 否则按 startTime 与 endTime 的时间差计算小时数
+     * 计算单条主持记录的时长（小时）与金币
      */
     function getHostRecordHours(h) {
       if (typeof h.hours === 'number' && !isNaN(h.hours) && h.hours >= 0) {
@@ -324,7 +389,7 @@
     }
 
     /**
-     * 计算单个场地的今日、本周、累计统计（严格按记录的 date 字段归属自然日历）
+     * 计算单个场地的今日、本周、累计统计
      */
     function calcVenueStat(venue) {
       const today = getTodayDateStr();
@@ -355,11 +420,6 @@
       const totalToday = schToday + hostToday;
       const totalWeek = schWeek + hostWeek;
 
-      const rule = PLATFORM_RULE[venue.platform] || PLATFORM_RULE.miya;
-      const resAll = rule.calc(totalCoin, data.global);
-      const resToday = rule.calc(totalToday, data.global);
-      const resWeek = rule.calc(totalWeek, data.global);
-
       return {
         schCoin,
         hostCoin,
@@ -371,28 +431,61 @@
         hostWeek,
         totalWeek,
         totalHostHours,
-        myr: resAll.myr,
-        myrToday: resToday.myr,
-        myrWeek: resWeek.myr
+        myr: calcCoinsToMyr(totalCoin, venue.platform, data.global),
+        myrToday: calcCoinsToMyr(totalToday, venue.platform, data.global),
+        myrWeek: calcCoinsToMyr(totalWeek, venue.platform, data.global)
       };
     }
 
-    // 计算所有场地全局总览
-    function calcGlobalStat() {
-      return data.venues.reduce((acc, v) => {
-        const st = calcVenueStat(v);
-        acc.totalToday += st.totalToday;
-        acc.myrToday += st.myrToday;
-        acc.totalWeek += st.totalWeek;
-        acc.myrWeek += st.myrWeek;
-        acc.totalCoin += st.totalCoin;
-        acc.myr += st.myr;
-        return acc;
-      }, {
-        totalToday: 0, myrToday: 0,
-        totalWeek: 0, myrWeek: 0,
-        totalCoin: 0, myr: 0
+    /**
+     * 按软件分开统计各软件今日、本周、累计金币与马币，并计算本周马币总计
+     */
+    function calcByPlatformStat() {
+      const map = {};
+      data.platforms.forEach(p => {
+        map[p.id] = {
+          platform: p,
+          todayCoin: 0,
+          weekCoin: 0,
+          allCoin: 0,
+          todayMyr: 0,
+          weekMyr: 0,
+          allMyr: 0,
+          venueCount: 0
+        };
       });
+
+      data.venues.forEach(v => {
+        const pid = getPlatformById(v.platform).id;
+        if (!map[pid]) {
+          map[pid] = {
+            platform: getPlatformById(pid),
+            todayCoin: 0,
+            weekCoin: 0,
+            allCoin: 0,
+            todayMyr: 0,
+            weekMyr: 0,
+            allMyr: 0,
+            venueCount: 0
+          };
+        }
+        const st = calcVenueStat(v);
+        map[pid].venueCount += 1;
+        map[pid].todayCoin += st.totalToday;
+        map[pid].weekCoin += st.totalWeek;
+        map[pid].allCoin += st.totalCoin;
+      });
+
+      let weekTotalMyr = 0;
+      const list = Object.values(map).map(item => {
+        item.todayMyr = calcCoinsToMyr(item.todayCoin, item.platform.id, data.global);
+        item.weekMyr = calcCoinsToMyr(item.weekCoin, item.platform.id, data.global);
+        item.allMyr = calcCoinsToMyr(item.allCoin, item.platform.id, data.global);
+        weekTotalMyr += item.weekMyr;
+        return item;
+      });
+
+      return { list, weekTotalMyr };
     }
 
     /**
@@ -448,12 +541,12 @@
 
     /**
      * =========================================================
-     * 4. 首页渲染与场地管理
+     * 4. 首页渲染、各软件分开统计、自定义软件与独立汇率
      * =========================================================
      */
     function renderHome() {
       currentVenueId = null;
-      const gStat = calcGlobalStat();
+      const { list: platformStats, weekTotalMyr } = calcByPlatformStat();
       const todayStr = getTodayDateStr();
       const weekStartStr = getWeekStartDateStr();
 
@@ -466,28 +559,39 @@
           <p class="text-xs text-[#5a6b82] mt-1">今日日历：${todayStr} · 本周起算：${weekStartStr} (周一)</p>
         </header>
 
-        <!-- 全局收入汇总卡片 -->
+        <!-- 各软件分开统计区 + 底部一行轻量本周马币小字总结 -->
         <section class="navy-card p-4 sm:p-5 mb-4">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-xs font-bold uppercase tracking-wider text-[#1e3a5f]">全部场地收入汇总</h2>
+          <div class="flex items-center justify-between mb-2.5">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-[#1e3a5f]">各软件赚取明细（分开算）</h2>
             <span class="text-xs text-[#5a6b82]">Migo 汇率：1 USD = ${data.global.usdToMyr} MYR</span>
           </div>
-          <div class="grid grid-cols-3 gap-2.5 sm:gap-4">
-            <div class="rounded-xl p-3 bg-[#f4f7fb] border border-[#dce4ef]">
-              <div class="text-xs text-[#5a6b82]">今日合计</div>
-              <div class="text-base sm:text-lg font-bold text-[#0f294a] mt-0.5">RM ${gStat.myrToday.toFixed(2)}</div>
-              <div class="text-[11px] text-[#2563eb] font-medium mt-0.5">${gStat.totalToday.toFixed(1)} 金币</div>
+
+          <div class="divide-y divide-[#e6edf6]">
+      `;
+
+      platformStats.forEach(item => {
+        const p = item.platform;
+        html += `
+          <div class="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+            <div class="flex items-center gap-2">
+              <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${p.badge}">${escapeHtml(p.name)}</span>
+              <span class="text-xs text-[#5a6b82]">${item.venueCount} 个场地</span>
             </div>
-            <div class="rounded-xl p-3 bg-[#f4f7fb] border border-[#dce4ef]">
-              <div class="text-xs text-[#5a6b82]">本周合计</div>
-              <div class="text-base sm:text-lg font-bold text-[#0f294a] mt-0.5">RM ${gStat.myrWeek.toFixed(2)}</div>
-              <div class="text-[11px] text-[#2563eb] font-medium mt-0.5">${gStat.totalWeek.toFixed(1)} 金币</div>
+            <div class="text-xs sm:text-sm text-[#0f294a] flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>今日：<strong>RM ${item.todayMyr.toFixed(2)}</strong> <span class="text-[11px] text-[#5a6b82]">(${item.todayCoin.toFixed(1)}币)</span></span>
+              <span>本周：<strong class="text-[#2563eb]">RM ${item.weekMyr.toFixed(2)}</strong> <span class="text-[11px] text-[#5a6b82]">(${item.weekCoin.toFixed(1)}币)</span></span>
+              <span>累计：<strong>RM ${item.allMyr.toFixed(2)}</strong></span>
             </div>
-            <div class="rounded-xl p-3 bg-[#0f294a] text-white border border-[#0f294a]">
-              <div class="text-xs text-[#b8d0f0]">累计总计</div>
-              <div class="text-base sm:text-lg font-bold text-white mt-0.5">RM ${gStat.myr.toFixed(2)}</div>
-              <div class="text-[11px] text-[#93c5fd] font-medium mt-0.5">${gStat.totalCoin.toFixed(1)} 金币</div>
-            </div>
+          </div>
+        `;
+      });
+
+      html += `
+          </div>
+
+          <div class="pt-3 mt-1 border-t border-[#e6edf6] flex items-center justify-between text-xs text-[#5a6b82]">
+            <span>各软件独立换算后汇总</span>
+            <span>本周总共：<strong class="text-[#0f294a]">RM ${weekTotalMyr.toFixed(2)}</strong></span>
           </div>
         </section>
 
@@ -514,14 +618,14 @@
       } else {
         html += `<div class="space-y-2.5">`;
         data.venues.forEach(v => {
-          const rule = PLATFORM_RULE[v.platform] || PLATFORM_RULE.miya;
+          const p = getPlatformById(v.platform);
           const st = calcVenueStat(v);
           html += `
             <div class="rounded-xl p-3.5 bg-[#f9fbfe] hover:bg-white border border-[#dce4ef] transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div class="cursor-pointer flex-1" onclick="openVenue('${v.id}')">
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="font-bold text-base text-[#0f294a]">${escapeHtml(v.name)}</span>
-                  <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${rule.badge}">${rule.name}</span>
+                  <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${p.badge}">${escapeHtml(p.name)}</span>
                 </div>
                 <div class="text-xs text-[#5a6b82] mt-1 flex flex-wrap gap-x-3 gap-y-1">
                   <span>营业 ${v.openStart} ~ ${v.openEnd}</span>
@@ -529,7 +633,7 @@
                   <span>主持 ${v.hostCoinPerHour}币/h</span>
                 </div>
                 <div class="text-xs font-semibold text-[#1e3a5f] mt-1.5">
-                  今日：RM ${st.myrToday.toFixed(2)} (${st.totalToday.toFixed(0)}币) · 累计：RM ${st.myr.toFixed(2)}
+                  今日：RM ${st.myrToday.toFixed(2)} (${st.totalToday.toFixed(0)}币) · 本周：RM ${st.myrWeek.toFixed(2)} · 累计：RM ${st.myr.toFixed(2)}
                 </div>
               </div>
               <div class="flex items-center gap-1.5 self-end sm:self-center">
@@ -545,9 +649,43 @@
 
       html += `</section>
 
-        <!-- 全局汇率与备份管理 -->
-        <section class="navy-card p-4 sm:p-5">
-          <h3 class="text-sm font-bold text-[#0f294a] mb-3">全局汇率与备份</h3>
+        <!-- 自定义软件与独立汇率管理 -->
+        <section class="navy-card p-4 sm:p-5 mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="text-sm font-bold text-[#0f294a]">软件与独立汇率管理</h3>
+              <p class="text-xs text-[#5a6b82]">可随时新增其他软件，或单独调整各软件换算马币的汇率</p>
+            </div>
+            <button class="btn-navy btn-navy-primary px-3 py-1.5 text-xs" onclick="openPlatformModal()">+ 新增软件</button>
+          </div>
+
+          <div class="divide-y divide-[#e6edf6] mb-4">
+      `;
+
+      data.platforms.forEach(p => {
+        const rateDisplay = p.mode === 'migo_usd'
+          ? `1 USD = ${data.global.usdToMyr} MYR`
+          : `1 币 = ${(Number(p.myrPerCoin) || 0).toFixed(6)} MYR`;
+        html += `
+          <div class="py-2.5 flex items-center justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${p.badge}">${escapeHtml(p.name)}</span>
+                <span class="text-xs font-medium text-[#0f294a]">${rateDisplay}</span>
+              </div>
+              <div class="text-[11px] text-[#5a6b82] mt-0.5 truncate">${escapeHtml(getPlatformRuleText(p, data.global))}</div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button class="btn-navy px-2.5 py-1 text-xs" onclick="openPlatformModal('${p.id}')">改汇率/编辑</button>
+              ${!p.builtin ? `<button class="btn-navy btn-navy-danger px-2 py-1 text-xs" onclick="delPlatform('${p.id}')">删除</button>` : ''}
+            </div>
+          </div>
+        `;
+      });
+
+      html += `
+          </div>
+
           <div class="flex flex-col sm:flex-row sm:items-end gap-3 pb-4 border-b border-[#e6edf6]">
             <div class="flex-1">
               <label class="block text-xs text-[#5a6b82] mb-1">Migo 美元汇率（1 USD 兑 MYR）</label>
@@ -557,8 +695,9 @@
                 <span class="text-sm font-semibold text-[#0f294a]">MYR</span>
               </div>
             </div>
-            <button class="btn-navy px-4 py-2 text-xs sm:text-sm" onclick="saveGlobalRate()">保存汇率</button>
+            <button class="btn-navy px-4 py-2 text-xs sm:text-sm" onclick="saveGlobalRate()">保存 Migo 汇率</button>
           </div>
+
           <div class="pt-3.5 flex flex-wrap items-center justify-between gap-2">
             <span class="text-xs text-[#5a6b82]">数据存储于本地浏览器，建议定期导出 JSON 备份</span>
             <div class="flex gap-2">
@@ -572,6 +711,134 @@
       document.getElementById('app').innerHTML = html;
     }
 
+    // 新增或编辑软件及独立马币汇率
+    function openPlatformModal(editId = null) {
+      const isEdit = Boolean(editId);
+      const target = isEdit ? getPlatformById(editId) : {
+        id: '',
+        name: '',
+        myrPerCoin: 0.01,
+        mode: 'direct',
+        builtin: false
+      };
+      if (!target) return;
+
+      const isMigo = target.mode === 'migo_usd';
+
+      openModal(`
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-bold text-[#0f294a]">${isEdit ? '编辑软件与汇率' : '新增软件'}</h3>
+          <button class="text-[#5a6b82] hover:text-[#0f294a] text-xl leading-none px-1" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">软件名称</label>
+            <input type="text" id="pName" class="input-navy" placeholder="例如：糖果、星屿、某某语音" value="${escapeHtml(target.name)}">
+          </div>
+          ${isMigo ? `
+            <div class="p-3 rounded-xl bg-[#f4f7fb] border border-[#dce4ef] text-xs text-[#1e3a5f]">
+              Migo 使用下方全局「1 USD 兑 MYR」汇率进行换算（礼物值 = 金币 × 2.8，美元 = 礼物值 ÷ 40000）。
+            </div>
+          ` : `
+            <div>
+              <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">换算方式（任选一种填入）</label>
+              <div class="grid grid-cols-1 gap-2.5 bg-[#f9fbfe] p-3 rounded-xl border border-[#dce4ef]">
+                <div>
+                  <span class="block text-[11px] text-[#5a6b82] mb-1">方式 A：直接填「1 金币 = 多少马币 (MYR)」</span>
+                  <input type="number" step="0.000001" min="0" id="pMyrPerCoin" class="input-navy text-xs" value="${Number(target.myrPerCoin) || 0}">
+                </div>
+                <div>
+                  <span class="block text-[11px] text-[#5a6b82] mb-1">方式 B：按「多少金币/积分 = 1 马币 (MYR)」填除数（填后自动算上方单价）</span>
+                  <input type="number" step="0.01" min="0" id="pCoinsPerMyr" class="input-navy text-xs" placeholder="例如 100 表示 100 币 = 1 马币" oninput="syncRateFromDivisor()">
+                </div>
+              </div>
+            </div>
+          `}
+        </div>
+        <div class="flex justify-end gap-2 mt-6">
+          <button class="btn-navy px-4 py-2 text-xs sm:text-sm" onclick="closeModal()">取消</button>
+          <button class="btn-navy btn-navy-primary px-4 py-2 text-xs sm:text-sm" onclick="savePlatformModal('${editId || ''}')">
+            ${isEdit ? '保存设置' : '确认添加'}
+          </button>
+        </div>
+      `);
+    }
+
+    function syncRateFromDivisor() {
+      const divInput = document.getElementById('pCoinsPerMyr');
+      const rateInput = document.getElementById('pMyrPerCoin');
+      if (!divInput || !rateInput) return;
+      const divisor = parseFloat(divInput.value);
+      if (!isNaN(divisor) && divisor > 0) {
+        rateInput.value = (1 / divisor).toFixed(6);
+      }
+    }
+
+    function savePlatformModal(editId) {
+      const name = document.getElementById('pName').value.trim();
+      if (!name) {
+        showToast('请填写软件名称', 'error');
+        return;
+      }
+
+      if (editId) {
+        const p = data.platforms.find(x => x.id === editId);
+        if (!p) return;
+        p.name = name;
+        if (p.mode !== 'migo_usd') {
+          const rate = parseFloat(document.getElementById('pMyrPerCoin').value);
+          if (isNaN(rate) || rate < 0) {
+            showToast('请填写有效的马币换算率', 'error');
+            return;
+          }
+          p.myrPerCoin = rate;
+          p.customRateEdited = true;
+        }
+        save();
+        closeModal();
+        renderHome();
+        showToast(`已更新软件「${name}」`, 'success');
+      } else {
+        const rate = parseFloat(document.getElementById('pMyrPerCoin').value);
+        if (isNaN(rate) || rate < 0) {
+          showToast('请填写有效的马币换算率', 'error');
+          return;
+        }
+        const badges = [
+          'bg-blue-50 text-[#0f294a] border-blue-200',
+          'bg-indigo-50 text-[#1e3a5f] border-indigo-200',
+          'bg-sky-50 text-[#0f294a] border-sky-200',
+          'bg-cyan-50 text-[#0f294a] border-cyan-200'
+        ];
+        data.platforms.push({
+          id: 'plat_' + uuid(),
+          name,
+          badge: badges[data.platforms.length % badges.length],
+          myrPerCoin: rate,
+          customRateEdited: true,
+          builtin: false
+        });
+        save();
+        closeModal();
+        renderHome();
+        showToast(`已新增软件「${name}」`, 'success');
+      }
+    }
+
+    function delPlatform(id) {
+      const p = data.platforms.find(x => x.id === id);
+      if (!p || p.builtin) return;
+      const usedByVenues = data.venues.filter(v => v.platform === id);
+      const fallbackId = data.platforms.find(x => x.id !== id)?.id || 'miya';
+      usedByVenues.forEach(v => {
+        v.platform = fallbackId;
+      });
+      data.platforms = data.platforms.filter(x => x.id !== id);
+      save();
+      renderHome();
+      showToast(`已删除软件「${p.name}」`, 'info');
+    }
+
     function saveGlobalRate() {
       const val = parseFloat(document.getElementById('usdRateInput').value);
       if (isNaN(val) || val <= 0) {
@@ -581,20 +848,26 @@
       data.global.usdToMyr = val;
       save();
       renderHome();
-      showToast(`汇率已保存：1 USD = ${val} MYR`, 'success');
+      showToast(`Migo 汇率已保存：1 USD = ${val} MYR`, 'success');
     }
 
     function openVenueModal(editId = null) {
       const isEdit = Boolean(editId);
+      const firstPlatId = data.platforms[0]?.id || 'miya';
       const target = isEdit ? data.venues.find(v => v.id === editId) : {
         name: '',
-        platform: 'miya',
+        platform: firstPlatId,
         openStart: '20:00',
         openEnd: '02:00',
         scheduleCoinPer: 200,
         hostCoinPerHour: 100
       };
       if (!target) return;
+
+      const selectedPlat = getPlatformById(target.platform);
+      const optionsHtml = data.platforms.map(p =>
+        `<option value="${p.id}" ${p.id === selectedPlat.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`
+      ).join('');
 
       openModal(`
         <div class="flex items-center justify-between mb-4">
@@ -607,13 +880,11 @@
             <input type="text" id="mName" class="input-navy" placeholder="输入场地名称" value="${escapeHtml(target.name)}">
           </div>
           <div>
-            <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">平台规则</label>
+            <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">所属软件</label>
             <select id="mPlatform" class="input-navy" onchange="onModalPlatformChange()">
-              <option value="miya" ${target.platform === 'miya' ? 'selected' : ''}>Miya</option>
-              <option value="momi" ${target.platform === 'momi' ? 'selected' : ''}>Momi</option>
-              <option value="migo" ${target.platform === 'migo' ? 'selected' : ''}>Migo</option>
+              ${optionsHtml}
             </select>
-            <p id="mRuleDesc" class="text-[11px] text-[#2563eb] mt-1">${PLATFORM_RULE[target.platform].ruleText}</p>
+            <p id="mRuleDesc" class="text-[11px] text-[#2563eb] mt-1">${escapeHtml(getPlatformRuleText(selectedPlat, data.global))}</p>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
@@ -646,9 +917,10 @@
     }
 
     function onModalPlatformChange() {
-      const p = document.getElementById('mPlatform').value;
+      const pid = document.getElementById('mPlatform').value;
       const el = document.getElementById('mRuleDesc');
-      if (el && PLATFORM_RULE[p]) el.textContent = PLATFORM_RULE[p].ruleText;
+      const p = getPlatformById(pid);
+      if (el && p) el.textContent = getPlatformRuleText(p, data.global);
     }
 
     function saveVenueModal(editId) {
@@ -742,7 +1014,7 @@
       if (!v) return renderHome();
 
       const st = calcVenueStat(v);
-      const rule = PLATFORM_RULE[v.platform] || PLATFORM_RULE.miya;
+      const p = getPlatformById(v.platform);
 
       let html = `
         <!-- 顶部导航 -->
@@ -756,7 +1028,7 @@
           <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
             <div class="flex items-center gap-2 flex-wrap">
               <h1 class="text-xl font-bold text-[#0f294a]">${escapeHtml(v.name)}</h1>
-              <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${rule.badge}">${rule.name}</span>
+              <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${p.badge}">${escapeHtml(p.name)}</span>
             </div>
             <span class="text-xs text-[#5a6b82]">自然日：${getTodayDateStr()}</span>
           </div>
@@ -817,7 +1089,6 @@
       const dayChecked = v.scheduleList.filter(x => x.date === selectedScheduleDate && x.checked);
       const dayCoins = dayChecked.length * schPrice;
 
-      // 历史打卡日期汇总（严格按 date 字段分组）
       const dateMap = {};
       v.scheduleList.forEach(item => {
         if (!item.checked || !item.date) return;
@@ -978,32 +1249,26 @@
     }
 
     /**
-     * 主持记录页（核心改造）：
-     * 像排档一样按小时格点选打卡（每格 1 小时 * hostCoinPerHour），严格按自然日历日期归属，
-     * 同时提供可折叠的备用“自定义起止时间/时长”入口。
+     * 主持记录页：按小时格点选打卡 + 可折叠自定义时长
      */
     function renderHostTab(v) {
       const today = getTodayDateStr();
       const isToday = selectedHostDate === today;
       const hostPrice = Number(v.hostCoinPerHour) || 0;
 
-      // 可选小时格列表：默认全天 00:00~23:00，也可切换仅看场地营业时段
       const displayHours = hostHoursOnlyOperating
         ? getOperatingHours(v.openStart, v.openEnd)
         : Array.from({ length: 24 }, (_, i) => i);
 
-      // 当前选中日期下，按小时格打卡的记录（type === 'slot'）
       const daySlotRecords = v.hostList.filter(x => x.date === selectedHostDate && x.type === 'slot');
       const daySlotHours = daySlotRecords.length;
       const daySlotCoins = daySlotHours * hostPrice;
 
-      // 当前选中日期所有主持记录（含小时格 + 自定义时长）的总小时与总金币
       const dayAllHost = v.hostList.filter(x => x.date === selectedHostDate);
       const dayAllHours = dayAllHost.reduce((sum, item) => sum + getHostRecordHours(item), 0);
       const dayAllCoins = dayAllHours * hostPrice;
 
       let html = `
-        <!-- 主持小时格打卡主卡片 -->
         <div class="navy-card p-4 sm:p-5 mb-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-[#e6edf6]">
             <div>
@@ -1016,7 +1281,6 @@
             </div>
           </div>
 
-          <!-- 范围切换与当日汇总条 -->
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs bg-[#f4f7fb] border border-[#dce4ef] px-3 py-2 rounded-lg mb-3">
             <div class="flex items-center gap-2 flex-wrap">
               <span>日期：<strong class="text-[#0f294a]">${selectedHostDate}</strong></span>
@@ -1029,7 +1293,6 @@
             </button>
           </div>
 
-          <!-- 24小时/营业时段打卡网格 -->
           <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 my-3">
       `;
 
@@ -1059,7 +1322,6 @@
             </div>
           </div>
 
-          <!-- 可折叠备用的自定义起止时间表单 -->
           ${showCustomHostForm ? `
             <div class="mt-4 pt-4 border-t border-dashed border-[#c7d4e6] bg-[#f9fbfe] p-3.5 rounded-xl">
               <div class="text-xs font-bold text-[#1e3a5f] mb-2.5">自定义主持时段（归属日期：${selectedHostDate}）</div>
@@ -1084,7 +1346,6 @@
           ` : ''}
         </div>
 
-        <!-- 主持记录明细列表 -->
         <div class="navy-card p-4 sm:p-5 mb-4">
           <h3 class="text-sm font-bold text-[#0f294a] mb-3">主持记录明细 (${v.hostList.length} 条)</h3>
       `;
@@ -1125,7 +1386,6 @@
 
       html += `</div>
 
-        <!-- 主持时薪设置 -->
         <div class="navy-card p-4 sm:p-5">
           <h3 class="text-sm font-bold text-[#0f294a] mb-3">主持设置</h3>
           <div class="flex items-end gap-3">
@@ -1157,7 +1417,6 @@
       renderVenue();
     }
 
-    // 点选或取消某个自然日历日期下的 1 小时格子
     function toggleHostHourSlot(hh) {
       const v = data.venues.find(x => x.id === currentVenueId);
       if (!v) return;
@@ -1182,7 +1441,6 @@
       renderVenue();
     }
 
-    // 全选或清空当前展示范围的小时格
     function batchHostSlots(enable) {
       const v = data.venues.find(x => x.id === currentVenueId);
       if (!v) return;
@@ -1217,7 +1475,6 @@
       renderVenue();
     }
 
-    // 备用：添加自定义时段时长记录
     function addCustomHostRecord() {
       const v = data.venues.find(x => x.id === currentVenueId);
       if (!v) return;
@@ -1309,10 +1566,14 @@
             if (!parsed.global || typeof parsed.global.usdToMyr !== 'number' || isNaN(parsed.global.usdToMyr)) {
               parsed.global = { usdToMyr: 4.6 };
             }
+            if (!Array.isArray(parsed.platforms) || parsed.platforms.length === 0) {
+              parsed.platforms = getDefaultPlatforms();
+            }
+            const validIds = new Set(parsed.platforms.map(p => p.id));
             parsed.venues.forEach(v => {
               if (!v.id) v.id = uuid();
               if (!v.name) v.name = '未命名场地';
-              if (!PLATFORM_RULE[v.platform]) v.platform = 'miya';
+              if (!validIds.has(v.platform)) v.platform = parsed.platforms[0]?.id || 'miya';
               if (!Array.isArray(v.scheduleList)) v.scheduleList = [];
               if (!Array.isArray(v.hostList)) v.hostList = [];
             });
