@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的排档主持记录</title>
+  <!-- 引入 Tailwind CSS 实现现代响应式布局 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 引入 Inter 与 Noto Sans SC 字体提升中英文排版清晰度 -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* 深蓝白主题设计令牌 */
+    :root {
+      --navy-deep: #0f294a;
+      --navy-mid: #1e3a5f;
+      --navy-hover: #163052;
+      --blue-bright: #2563eb;
+      --blue-soft: #e8f0fe;
+      --bg-ice: #f4f7fb;
+      --card-white: #ffffff;
+      --border-slate: #dce4ef;
+      --text-primary: #0f294a;
+      --text-secondary: #5a6b82;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-ice);
+      color: var(--text-primary);
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* 洁白卡片与细边框微阴影 */
+    .navy-card {
+      background: var(--card-white);
+      border: 1px solid var(--border-slate);
+      border-radius: 14px;
+      box-shadow: 0 3px 12px rgba(15, 41, 74, 0.04);
+    }
+
+    /* 通用按钮样式 */
+    .btn-navy {
+      border: 1px solid #c7d4e6;
+      background: #ffffff;
+      color: var(--navy-deep);
+      border-radius: 10px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.16s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn-navy:hover {
+      background: #eef4fc;
+      border-color: #9cb3d3;
+    }
+
+    .btn-navy:active {
+      transform: scale(0.98);
+    }
+
+    .btn-navy-primary {
+      background: var(--navy-deep);
+      border-color: var(--navy-deep);
+      color: #ffffff;
+    }
+
+    .btn-navy-primary:hover {
+      background: var(--navy-hover);
+      border-color: var(--navy-hover);
+    }
+
+    .btn-navy-danger {
+      color: #c62828;
+      border-color: transparent;
+      background: transparent;
+    }
+
+    .btn-navy-danger:hover {
+      background: #fdecec;
+      border-color: #f8caca;
+    }
+
+    /* 表单输入控件 */
+    .input-navy {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid #cbd6e6;
+      border-radius: 10px;
+      font-size: 14px;
+      background: #f9fbfe;
+      color: var(--navy-deep);
+      outline: none;
+      transition: border-color 0.18s ease, background-color 0.18s ease;
+    }
+
+    .input-navy:focus {
+      border-color: var(--blue-bright);
+      background: #ffffff;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    /* 小时打卡格子样式 */
+    .slot-box {
+      border: 1px solid #d5dfed;
+      background: #f9fbfe;
+      color: var(--navy-deep);
+      border-radius: 10px;
+      padding: 10px 6px;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s ease;
+    }
+
+    .slot-box:hover {
+      border-color: #7da1d4;
+      background: #eef5ff;
+    }
+
+    .slot-box.checked {
+      background: var(--navy-deep);
+      border-color: var(--navy-deep);
+      color: #ffffff;
+      box-shadow: 0 3px 8px rgba(15, 41, 74, 0.22);
+    }
+
+    .slot-box.checked .slot-sub {
+      color: #b8d0f0;
+    }
+
+    /* Toast 动画 */
+    @keyframes toastIn {
+      from { opacity: 0; transform: translate(-50%, -14px); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    .toast-banner {
+      animation: toastIn 0.22s ease forwards;
+    }
+
+    /* 模态框背景 */
+    .modal-overlay {
+      background: rgba(15, 41, 74, 0.45);
+      backdrop-filter: blur(2px);
+    }
+  </style>
+</head>
+<body class="pb-14">
+
+  <!-- 顶部 Toast 提示容器 -->
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex flex-col gap-2 w-11/12 max-w-sm"></div>
+
+  <!-- 主应用挂载点 -->
+  <div id="app" class="max-w-3xl mx-auto px-4 pt-6 sm:pt-8"></div>
+
+  <!-- 模态框容器 -->
+  <div id="modal-root" class="fixed inset-0 z-40 hidden items-center justify-center p-4 modal-overlay"></div>
+
+  <script>
+    /**
+     * =========================================================
+     * 1. 存储与平台换算配置
+     * =========================================================
+     */
+    const STORAGE_KEY = 'schedule_host_record';
+
+    // 各平台换算规则定义
+    const PLATFORM_RULE = {
+      miya: {
+        name: 'Miya',
+        badge: 'bg-blue-50 text-[#0f294a] border-blue-200',
+        ruleText: '魅力值 = 金币 × 0.7 | 马币 = 魅力值 ÷ 180',
+        calc: (coins) => {
+          const charm = coins * 0.7;
+          return { metric: charm, usd: null, myr: charm / 180 };
+        }
+      },
+      momi: {
+        name: 'Momi',
+        badge: 'bg-indigo-50 text-[#1e3a5f] border-indigo-200',
+        ruleText: '魅力值 = 金币 × 0.7 | 马币 = 魅力值 ÷ 10000 × 52',
+        calc: (coins) => {
+          const charm = coins * 0.7;
+          return { metric: charm, usd: null, myr: (charm / 10000) * 52 };
+        }
+      },
+      migo: {
+        name: 'Migo',
+        badge: 'bg-sky-50 text-[#0f294a] border-sky-200',
+        ruleText: '礼物值 = 金币 × 2.8 | 美元 = 礼物值 ÷ 40000 | 马币 = 美元 × 汇率',
+        calc: (coins, globalCfg) => {
+          const gift = coins * 2.8;
+          const usd = gift / 40000;
+          const rate = Number(globalCfg?.usdToMyr) || 4.6;
+          return { metric: gift, usd, myr: usd * rate };
+        }
+      }
+    };
+
+    // 加载并校验本地数据，兼容旧结构
+    function loadData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          return { venues: [], global: { usdToMyr: 4.6 } };
+        }
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') {
+          return { venues: [], global: { usdToMyr: 4.6 } };
+        }
+        if (!Array.isArray(parsed.venues)) parsed.venues = [];
+        if (!parsed.global || typeof parsed.global.usdToMyr !== 'number' || isNaN(parsed.global.usdToMyr)) {
+          parsed.global = { usdToMyr: 4.6 };
+        }
+        parsed.venues.forEach(v => {
+          if (!Array.isArray(v.scheduleList)) v.scheduleList = [];
+          if (!Array.isArray(v.hostList)) v.hostList = [];
+          if (!PLATFORM_RULE[v.platform]) v.platform = 'miya';
+        });
+        return parsed;
+      } catch (err) {
+        console.error('读取本地数据异常:', err);
+        return { venues: [], global: { usdToMyr: 4.6 } };
+      }
+    }
+
+    let data = loadData();
+
+    // 页面与交互状态
+    let currentVenueId = null;
+    let currentTab = 'schedule'; // 'schedule' | 'host'
+    let selectedScheduleDate = getTodayDateStr(); // 排档打卡日期
+    let selectedHostDate = getTodayDateStr();     // 主持小时格打卡日期
+    let hostHoursOnlyOperating = false;         // 主持格子是否仅显示场地营业时段
+    let showCustomHostForm = false;             // 是否展开备用的自定义时段/时长表单
+
+    /**
+     * =========================================================
+     * 2. 日历与时间工具函数（严格按自然日历日期归属）
+     * =========================================================
+     */
+    function save() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      } catch (err) {
+        showToast('保存到本地存储失败', 'error');
+      }
+    }
+
+    function uuid() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+
+    // 格式化 Date 为本地自然日历 YYYY-MM-DD
+    function formatDateStr(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    // 获取当前自然日历“今天”
+    function getTodayDateStr() {
+      return formatDateStr(new Date());
+    }
+
+    // 获取当前自然日历“本周一”日期字符串（周一至周日为一个自然周）
+    function getWeekStartDateStr() {
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 周日为0，周一~周六为1~6
+      const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday);
+      return formatDateStr(monday);
+    }
+
+    // 解析营业时段小时数组（防死循环，支持跨夜与非整点结束）
+    function getOperatingHours(openStart, openEnd) {
+      if (!openStart || !openEnd || !openStart.includes(':') || !openEnd.includes(':')) {
+        return [20, 21, 22, 23, 0, 1];
+      }
+      const [sh, sm] = openStart.split(':').map(Number);
+      const [eh, em] = openEnd.split(':').map(Number);
+      if ([sh, sm, eh, em].some(n => isNaN(n))) {
+        return [20, 21, 22, 23, 0, 1];
+      }
+      if (sh === eh && sm === em) {
+        return [sh];
+      }
+      const startMin = sh * 60 + sm;
+      let endMin = eh * 60 + em;
+      if (endMin <= startMin) {
+        endMin += 24 * 60;
+      }
+      const slotCount = Math.min(24, Math.max(1, Math.ceil((endMin - startMin) / 60)));
+      const list = [];
+      for (let i = 0; i < slotCount; i++) {
+        list.push((sh + i) % 24);
+      }
+      return list;
+    }
+
+    /**
+     * 计算单条主持记录的时长（小时）与金币：
+     * - 若记录包含 hours 字段（例如小时格打卡或自定义时长），优先使用 hours
+     * - 否则按 startTime 与 endTime 的时间差计算小时数
+     */
+    function getHostRecordHours(h) {
+      if (typeof h.hours === 'number' && !isNaN(h.hours) && h.hours >= 0) {
+        return h.hours;
+      }
+      const diff = (new Date(h.endTime).getTime() - new Date(h.startTime).getTime()) / 3600000;
+      return isNaN(diff) || diff < 0 ? 0 : diff;
+    }
+
+    /**
+     * 计算单个场地的今日、本周、累计统计（严格按记录的 date 字段归属自然日历）
+     */
+    function calcVenueStat(venue) {
+      const today = getTodayDateStr();
+      const weekStart = getWeekStartDateStr();
+      const schPrice = Number(venue.scheduleCoinPer) || 0;
+      const hostPrice = Number(venue.hostCoinPerHour) || 0;
+
+      let schCoin = 0, schToday = 0, schWeek = 0;
+      venue.scheduleList.forEach(s => {
+        if (!s || !s.checked) return;
+        schCoin += schPrice;
+        if (s.date === today) schToday += schPrice;
+        if (s.date >= weekStart) schWeek += schPrice;
+      });
+
+      let hostCoin = 0, hostToday = 0, hostWeek = 0, totalHostHours = 0;
+      venue.hostList.forEach(h => {
+        if (!h) return;
+        const hrs = getHostRecordHours(h);
+        const c = hrs * hostPrice;
+        totalHostHours += hrs;
+        hostCoin += c;
+        if (h.date === today) hostToday += c;
+        if (h.date >= weekStart) hostWeek += c;
+      });
+
+      const totalCoin = schCoin + hostCoin;
+      const totalToday = schToday + hostToday;
+      const totalWeek = schWeek + hostWeek;
+
+      const rule = PLATFORM_RULE[venue.platform] || PLATFORM_RULE.miya;
+      const resAll = rule.calc(totalCoin, data.global);
+      const resToday = rule.calc(totalToday, data.global);
+      const resWeek = rule.calc(totalWeek, data.global);
+
+      return {
+        schCoin,
+        hostCoin,
+        totalCoin,
+        schToday,
+        hostToday,
+        totalToday,
+        schWeek,
+        hostWeek,
+        totalWeek,
+        totalHostHours,
+        myr: resAll.myr,
+        myrToday: resToday.myr,
+        myrWeek: resWeek.myr
+      };
+    }
+
+    // 计算所有场地全局总览
+    function calcGlobalStat() {
+      return data.venues.reduce((acc, v) => {
+        const st = calcVenueStat(v);
+        acc.totalToday += st.totalToday;
+        acc.myrToday += st.myrToday;
+        acc.totalWeek += st.totalWeek;
+        acc.myrWeek += st.myrWeek;
+        acc.totalCoin += st.totalCoin;
+        acc.myr += st.myr;
+        return acc;
+      }, {
+        totalToday: 0, myrToday: 0,
+        totalWeek: 0, myrWeek: 0,
+        totalCoin: 0, myr: 0
+      });
+    }
+
+    /**
+     * =========================================================
+     * 3. 提示与模态框辅助组件
+     * =========================================================
+     */
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const el = document.createElement('div');
+      const styles = {
+        success: 'bg-[#0f294a] text-white border-[#1e3a5f]',
+        error: 'bg-[#b91c1c] text-white border-[#991b1b]',
+        info: 'bg-[#1e3a5f] text-white border-[#0f294a]'
+      };
+      el.className = `toast-banner px-4 py-2.5 rounded-xl shadow-lg border text-xs sm:text-sm font-medium text-center ${styles[type] || styles.info}`;
+      el.textContent = msg;
+      container.appendChild(el);
+      setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transition = 'opacity 0.2s ease';
+        setTimeout(() => el.remove(), 220);
+      }, 2300);
+    }
+
+    function openModal(innerHtml) {
+      const root = document.getElementById('modal-root');
+      root.innerHTML = `<div class="navy-card w-full max-w-md p-5 sm:p-6 shadow-2xl">${innerHtml}</div>`;
+      root.classList.remove('hidden');
+      root.classList.add('flex');
+    }
+
+    function closeModal() {
+      const root = document.getElementById('modal-root');
+      root.classList.add('hidden');
+      root.classList.remove('flex');
+      root.innerHTML = '';
+    }
+
+    document.getElementById('modal-root').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-root') closeModal();
+    });
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    /**
+     * =========================================================
+     * 4. 首页渲染与场地管理
+     * =========================================================
+     */
+    function renderHome() {
+      currentVenueId = null;
+      const gStat = calcGlobalStat();
+      const todayStr = getTodayDateStr();
+      const weekStartStr = getWeekStartDateStr();
+
+      let html = `
+        <header class="text-center mb-6">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-[#dce4ef] text-xs font-medium text-[#1e3a5f] mb-2">
+            <span>自然日历计账 · 00:00 独立分日</span>
+          </div>
+          <h1 class="text-2xl font-bold tracking-wide text-[#0f294a]">我的排档主持记录</h1>
+          <p class="text-xs text-[#5a6b82] mt-1">今日日历：${todayStr} · 本周起算：${weekStartStr} (周一)</p>
+        </header>
+
+        <!-- 全局收入汇总卡片 -->
+        <section class="navy-card p-4 sm:p-5 mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-[#1e3a5f]">全部场地收入汇总</h2>
+            <span class="text-xs text-[#5a6b82]">Migo 汇率：1 USD = ${data.global.usdToMyr} MYR</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2.5 sm:gap-4">
+            <div class="rounded-xl p-3 bg-[#f4f7fb] border border-[#dce4ef]">
+              <div class="text-xs text-[#5a6b82]">今日合计</div>
+              <div class="text-base sm:text-lg font-bold text-[#0f294a] mt-0.5">RM ${gStat.myrToday.toFixed(2)}</div>
+              <div class="text-[11px] text-[#2563eb] font-medium mt-0.5">${gStat.totalToday.toFixed(1)} 金币</div>
+            </div>
+            <div class="rounded-xl p-3 bg-[#f4f7fb] border border-[#dce4ef]">
+              <div class="text-xs text-[#5a6b82]">本周合计</div>
+              <div class="text-base sm:text-lg font-bold text-[#0f294a] mt-0.5">RM ${gStat.myrWeek.toFixed(2)}</div>
+              <div class="text-[11px] text-[#2563eb] font-medium mt-0.5">${gStat.totalWeek.toFixed(1)} 金币</div>
+            </div>
+            <div class="rounded-xl p-3 bg-[#0f294a] text-white border border-[#0f294a]">
+              <div class="text-xs text-[#b8d0f0]">累计总计</div>
+              <div class="text-base sm:text-lg font-bold text-white mt-0.5">RM ${gStat.myr.toFixed(2)}</div>
+              <div class="text-[11px] text-[#93c5fd] font-medium mt-0.5">${gStat.totalCoin.toFixed(1)} 金币</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 场地列表 -->
+        <section class="navy-card p-4 sm:p-5 mb-4">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-base font-bold text-[#0f294a]">场地列表 (${data.venues.length})</h2>
+              <p class="text-xs text-[#5a6b82]">选择场地进行排档与主持小时格打卡</p>
+            </div>
+            <button class="btn-navy btn-navy-primary px-3.5 py-2 text-xs sm:text-sm" onclick="openVenueModal()">
+              + 新增场地
+            </button>
+          </div>
+      `;
+
+      if (data.venues.length === 0) {
+        html += `
+          <div class="text-center py-10 px-4 rounded-xl border border-dashed border-[#c7d4e6] bg-[#f9fbfe]">
+            <p class="text-sm text-[#5a6b82] mb-3">还没有添加任何场地</p>
+            <button class="btn-navy btn-navy-primary px-4 py-2 text-xs sm:text-sm" onclick="openVenueModal()">立即新增场地</button>
+          </div>
+        `;
+      } else {
+        html += `<div class="space-y-2.5">`;
+        data.venues.forEach(v => {
+          const rule = PLATFORM_RULE[v.platform] || PLATFORM_RULE.miya;
+          const st = calcVenueStat(v);
+          html += `
+            <div class="rounded-xl p-3.5 bg-[#f9fbfe] hover:bg-white border border-[#dce4ef] transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="cursor-pointer flex-1" onclick="openVenue('${v.id}')">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-bold text-base text-[#0f294a]">${escapeHtml(v.name)}</span>
+                  <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${rule.badge}">${rule.name}</span>
+                </div>
+                <div class="text-xs text-[#5a6b82] mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  <span>营业 ${v.openStart} ~ ${v.openEnd}</span>
+                  <span>排档 ${v.scheduleCoinPer}币/档</span>
+                  <span>主持 ${v.hostCoinPerHour}币/h</span>
+                </div>
+                <div class="text-xs font-semibold text-[#1e3a5f] mt-1.5">
+                  今日：RM ${st.myrToday.toFixed(2)} (${st.totalToday.toFixed(0)}币) · 累计：RM ${st.myr.toFixed(2)}
+                </div>
+              </div>
+              <div class="flex items-center gap-1.5 self-end sm:self-center">
+                <button class="btn-navy btn-navy-primary px-3 py-1.5 text-xs" onclick="openVenue('${v.id}')">进入</button>
+                <button class="btn-navy px-2.5 py-1.5 text-xs" onclick="openVenueModal('${v.id}')">编辑</button>
+                <button class="btn-navy btn-navy-danger px-2.5 py-1.5 text-xs" onclick="confirmDelVenue('${v.id}')">删除</button>
+              </div>
+            </div>
+          `;
+        });
+        html += `</div>`;
+      }
+
+      html += `</section>
+
+        <!-- 全局汇率与备份管理 -->
+        <section class="navy-card p-4 sm:p-5">
+          <h3 class="text-sm font-bold text-[#0f294a] mb-3">全局汇率与备份</h3>
+          <div class="flex flex-col sm:flex-row sm:items-end gap-3 pb-4 border-b border-[#e6edf6]">
+            <div class="flex-1">
+              <label class="block text-xs text-[#5a6b82] mb-1">Migo 美元汇率（1 USD 兑 MYR）</label>
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-[#0f294a]">1 USD =</span>
+                <input type="number" step="0.01" min="0.01" id="usdRateInput" class="input-navy max-w-[140px]" value="${data.global.usdToMyr}">
+                <span class="text-sm font-semibold text-[#0f294a]">MYR</span>
+              </div>
+            </div>
+            <button class="btn-navy px-4 py-2 text-xs sm:text-sm" onclick="saveGlobalRate()">保存汇率</button>
+          </div>
+          <div class="pt-3.5 flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-[#5a6b82]">数据存储于本地浏览器，建议定期导出 JSON 备份</span>
+            <div class="flex gap-2">
+              <button class="btn-navy px-3 py-1.5 text-xs" onclick="exportBackup()">导出备份</button>
+              <button class="btn-navy px-3 py-1.5 text-xs" onclick="importBackup()">导入备份</button>
+            </div>
+          </div>
+        </section>
+      `;
+
+      document.getElementById('app').innerHTML = html;
+    }
+
+    function saveGlobalRate() {
+      const val = parseFloat(document.getElementById('usdRateInput').value);
+      if (isNaN(val) || val <= 0) {
+        showToast('请输入大于 0 的汇率数值', 'error');
+        return;
+      }
+      data.global.usdToMyr = val;
+      save();
+      renderHome();
+      showToast(`汇率已保存：1 USD = ${val} MYR`, 'success');
+    }
+
+    function openVenueModal(editId = null) {
+      const isEdit = Boolean(editId);
+      const target = isEdit ? data.venues.find(v => v.id === editId) : {
+        name: '',
+        platform: 'miya',
+        openStart: '20:00',
+        openEnd: '02:00',
+        scheduleCoinPer: 200,
+        hostCoinPerHour: 100
+      };
+      if (!target) return;
+
+      openModal(`
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-bold text-[#0f294a]">${isEdit ? '编辑场地' : '新增场地'}</h3>
+          <button class="text-[#5a6b82] hover:text-[#0f294a] text-xl leading-none px-1" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">场地名称</label>
+            <input type="text" id="mName" class="input-navy" placeholder="输入场地名称" value="${escapeHtml(target.name)}">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">平台规则</label>
+            <select id="mPlatform" class="input-navy" onchange="onModalPlatformChange()">
+              <option value="miya" ${target.platform === 'miya' ? 'selected' : ''}>Miya</option>
+              <option value="momi" ${target.platform === 'momi' ? 'selected' : ''}>Momi</option>
+              <option value="migo" ${target.platform === 'migo' ? 'selected' : ''}>Migo</option>
+            </select>
+            <p id="mRuleDesc" class="text-[11px] text-[#2563eb] mt-1">${PLATFORM_RULE[target.platform].ruleText}</p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">营业开始</label>
+              <input type="time" id="mOpenStart" class="input-navy" value="${target.openStart}">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">营业结束</label>
+              <input type="time" id="mOpenEnd" class="input-navy" value="${target.openEnd}">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">排档每档金币</label>
+              <input type="number" min="0" step="1" id="mSchCoin" class="input-navy" value="${target.scheduleCoinPer}">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#1e3a5f] mb-1">主持每小时金币</label>
+              <input type="number" min="0" step="1" id="mHostCoin" class="input-navy" value="${target.hostCoinPerHour}">
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-6">
+          <button class="btn-navy px-4 py-2 text-xs sm:text-sm" onclick="closeModal()">取消</button>
+          <button class="btn-navy btn-navy-primary px-4 py-2 text-xs sm:text-sm" onclick="saveVenueModal('${editId || ''}')">
+            ${isEdit ? '保存修改' : '确认创建'}
+          </button>
+        </div>
+      `);
+    }
+
+    function onModalPlatformChange() {
+      const p = document.getElementById('mPlatform').value;
+      const el = document.getElementById('mRuleDesc');
+      if (el && PLATFORM_RULE[p]) el.textContent = PLATFORM_RULE[p].ruleText;
+    }
+
+    function saveVenueModal(editId) {
+      const name = document.getElementById('mName').value.trim();
+      const platform = document.getElementById('mPlatform').value;
+      const openStart = document.getElementById('mOpenStart').value || '20:00';
+      const openEnd = document.getElementById('mOpenEnd').value || '02:00';
+      const scheduleCoinPer = Math.max(0, Number(document.getElementById('mSchCoin').value) || 0);
+      const hostCoinPerHour = Math.max(0, Number(document.getElementById('mHostCoin').value) || 0);
+
+      if (!name) {
+        showToast('请填写场地名称', 'error');
+        return;
+      }
+
+      if (editId) {
+        const v = data.venues.find(x => x.id === editId);
+        if (!v) return;
+        v.name = name;
+        v.platform = platform;
+        v.openStart = openStart;
+        v.openEnd = openEnd;
+        v.scheduleCoinPer = scheduleCoinPer;
+        v.hostCoinPerHour = hostCoinPerHour;
+        save();
+        closeModal();
+        showToast('场地已更新', 'success');
+        if (currentVenueId === editId) renderVenue();
+        else renderHome();
+      } else {
+        data.venues.push({
+          id: uuid(),
+          name,
+          platform,
+          openStart,
+          openEnd,
+          scheduleCoinPer,
+          hostCoinPerHour,
+          scheduleList: [],
+          hostList: []
+        });
+        save();
+        closeModal();
+        renderHome();
+        showToast(`已新增场地「${name}」`, 'success');
+      }
+    }
+
+    function confirmDelVenue(id) {
+      const v = data.venues.find(x => x.id === id);
+      if (!v) return;
+      openModal(`
+        <h3 class="text-base font-bold text-[#0f294a] mb-2">确认删除场地</h3>
+        <p class="text-sm text-[#5a6b82] mb-5">确定删除场地「<strong class="text-[#0f294a]">${escapeHtml(v.name)}</strong>」吗？该场地的排档和主持记录将被一并清空。</p>
+        <div class="flex justify-end gap-2">
+          <button class="btn-navy px-4 py-2 text-xs sm:text-sm" onclick="closeModal()">取消</button>
+          <button class="btn-navy bg-[#b91c1c] border-[#b91c1c] text-white hover:bg-[#991b1b] px-4 py-2 text-xs sm:text-sm" onclick="delVenue('${id}')">确认删除</button>
+        </div>
+      `);
+    }
+
+    function delVenue(id) {
+      data.venues = data.venues.filter(x => x.id !== id);
+      save();
+      closeModal();
+      renderHome();
+      showToast('场地已删除', 'info');
+    }
+
+    /**
+     * =========================================================
+     * 5. 场地详情页（统计看板 + 排档打卡 + 主持小时格打卡）
+     * =========================================================
+     */
+    function openVenue(id) {
+      currentVenueId = id;
+      currentTab = 'schedule';
+      selectedScheduleDate = getTodayDateStr();
+      selectedHostDate = getTodayDateStr();
+      showCustomHostForm = false;
+      renderVenue();
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      renderVenue();
+    }
+
+    function renderVenue() {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return renderHome();
+
+      const st = calcVenueStat(v);
+      const rule = PLATFORM_RULE[v.platform] || PLATFORM_RULE.miya;
+
+      let html = `
+        <!-- 顶部导航 -->
+        <div class="flex items-center justify-between mb-4">
+          <button class="btn-navy px-3 py-1.5 text-xs" onclick="renderHome()">← 返回首页</button>
+          <button class="btn-navy px-3 py-1.5 text-xs" onclick="openVenueModal('${v.id}')">编辑场地</button>
+        </div>
+
+        <!-- 场地统计卡片 -->
+        <section class="navy-card p-4 sm:p-5 mb-4">
+          <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h1 class="text-xl font-bold text-[#0f294a]">${escapeHtml(v.name)}</h1>
+              <span class="text-xs px-2 py-0.5 rounded-md border font-semibold ${rule.badge}">${rule.name}</span>
+            </div>
+            <span class="text-xs text-[#5a6b82]">自然日：${getTodayDateStr()}</span>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2.5 sm:gap-3 mb-3">
+            <div class="rounded-xl p-2.5 sm:p-3 bg-[#f4f7fb] border border-[#dce4ef]">
+              <div class="text-xs text-[#5a6b82]">今日收益</div>
+              <div class="text-sm sm:text-base font-bold text-[#0f294a] mt-0.5">RM ${st.myrToday.toFixed(2)}</div>
+              <div class="text-[11px] text-[#2563eb] font-medium">${st.totalToday.toFixed(1)} 金币</div>
+            </div>
+            <div class="rounded-xl p-2.5 sm:p-3 bg-[#f4f7fb] border border-[#dce4ef]">
+              <div class="text-xs text-[#5a6b82]">本周收益</div>
+              <div class="text-sm sm:text-base font-bold text-[#0f294a] mt-0.5">RM ${st.myrWeek.toFixed(2)}</div>
+              <div class="text-[11px] text-[#2563eb] font-medium">${st.totalWeek.toFixed(1)} 金币</div>
+            </div>
+            <div class="rounded-xl p-2.5 sm:p-3 bg-[#0f294a] text-white border border-[#0f294a]">
+              <div class="text-xs text-[#b8d0f0]">累计收益</div>
+              <div class="text-sm sm:text-base font-bold text-white mt-0.5">RM ${st.myr.toFixed(2)}</div>
+              <div class="text-[11px] text-[#93c5fd] font-medium">${st.totalCoin.toFixed(1)} 金币</div>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between text-xs text-[#5a6b82] pt-2.5 border-t border-[#e6edf6] gap-2">
+            <span>排档金币：<strong class="text-[#0f294a]">${st.schCoin.toFixed(1)}</strong></span>
+            <span>主持金币：<strong class="text-[#0f294a]">${st.hostCoin.toFixed(1)}</strong> (${st.totalHostHours.toFixed(1)}h)</span>
+          </div>
+        </section>
+
+        <!-- 功能 Tab 切换 -->
+        <div class="grid grid-cols-2 bg-[#e2eaf5] p-1 rounded-xl mb-4">
+          <button onclick="switchTab('schedule')" class="py-2 text-xs sm:text-sm font-semibold rounded-lg transition ${currentTab === 'schedule' ? 'bg-[#0f294a] text-white shadow-sm' : 'text-[#1e3a5f] hover:bg-white/60'}">
+            排档打卡
+          </button>
+          <button onclick="switchTab('host')" class="py-2 text-xs sm:text-sm font-semibold rounded-lg transition ${currentTab === 'host' ? 'bg-[#0f294a] text-white shadow-sm' : 'text-[#1e3a5f] hover:bg-white/60'}">
+            主持小时打卡
+          </button>
+        </div>
+      `;
+
+      if (currentTab === 'schedule') {
+        html += renderScheduleTab(v);
+      } else {
+        html += renderHostTab(v);
+      }
+
+      document.getElementById('app').innerHTML = html;
+    }
+
+    /**
+     * 排档记录页：严格按选定自然日历日期打卡与归属
+     */
+    function renderScheduleTab(v) {
+      const today = getTodayDateStr();
+      const isToday = selectedScheduleDate === today;
+      const hours = getOperatingHours(v.openStart, v.openEnd);
+      const schPrice = Number(v.scheduleCoinPer) || 0;
+
+      const dayChecked = v.scheduleList.filter(x => x.date === selectedScheduleDate && x.checked);
+      const dayCoins = dayChecked.length * schPrice;
+
+      // 历史打卡日期汇总（严格按 date 字段分组）
+      const dateMap = {};
+      v.scheduleList.forEach(item => {
+        if (!item.checked || !item.date) return;
+        if (!dateMap[item.date]) dateMap[item.date] = [];
+        dateMap[item.date].push(item.hour);
+      });
+      const historyDates = Object.keys(dateMap).sort((a, b) => b.localeCompare(a));
+
+      let html = `
+        <div class="navy-card p-4 sm:p-5 mb-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-[#e6edf6]">
+            <div>
+              <h3 class="text-base font-bold text-[#0f294a]">${isToday ? '今日排档打卡' : '指定日期排档打卡'}</h3>
+              <p class="text-xs text-[#5a6b82]">每档 ${schPrice} 金币 · 严格按所选自然日历日期归属</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="date" class="input-navy !w-auto text-xs py-1.5" value="${selectedScheduleDate}" onchange="onSchDateChange(this.value)">
+              ${!isToday ? `<button class="btn-navy px-2.5 py-1.5 text-xs whitespace-nowrap" onclick="onSchDateChange('${today}')">今天</button>` : ''}
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-xs bg-[#f4f7fb] border border-[#dce4ef] px-3 py-2 rounded-lg mb-3">
+            <span>归属日期：<strong class="text-[#0f294a]">${selectedScheduleDate}</strong></span>
+            <span>已打 <strong class="text-[#0f294a]">${dayChecked.length}</strong> 档 · <strong class="text-[#2563eb]">${dayCoins.toFixed(1)}</strong> 金币</span>
+          </div>
+
+          <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 my-3">
+      `;
+
+      hours.forEach(hh => {
+        const key = `${selectedScheduleDate}-${hh}`;
+        const rec = v.scheduleList.find(x => x.key === key && x.date === selectedScheduleDate);
+        const checked = Boolean(rec?.checked);
+        const nextHh = (hh + 1) % 24;
+
+        html += `
+          <div class="slot-box ${checked ? 'checked' : ''}" onclick="toggleSchSlot('${key}', ${hh})">
+            <div class="text-sm font-semibold">${String(hh).padStart(2, '0')}:00</div>
+            <div class="slot-sub text-[10px] text-[#5a6b82] mt-0.5">${checked ? '✓ 已打卡' : `${String(hh).padStart(2, '0')}-${String(nextHh).padStart(2, '0')}时`}</div>
+          </div>
+        `;
+      });
+
+      html += `
+          </div>
+
+          <div class="flex justify-end gap-2 pt-3 border-t border-[#e6edf6]">
+            <button class="btn-navy px-3 py-1.5 text-xs" onclick="batchSchSlots(true)">一键全选当日</button>
+            <button class="btn-navy px-3 py-1.5 text-xs" onclick="batchSchSlots(false)">清空当日</button>
+          </div>
+        </div>
+
+        <!-- 历史排档汇总 -->
+        <div class="navy-card p-4 sm:p-5 mb-4">
+          <h3 class="text-sm font-bold text-[#0f294a] mb-3">排档历史日期汇总 (${historyDates.length} 天)</h3>
+      `;
+
+      if (historyDates.length === 0) {
+        html += `<p class="text-xs text-[#5a6b82] text-center py-4">暂无排档打卡记录</p>`;
+      } else {
+        html += `<div class="divide-y divide-[#e6edf6]">`;
+        historyDates.forEach(d => {
+          const hrs = dateMap[d].sort((a, b) => a - b);
+          const coins = hrs.length * schPrice;
+          const label = hrs.map(h => `${String(h).padStart(2, '0')}:00`).join(', ');
+          html += `
+            <div class="py-2.5 flex items-center justify-between gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-sm font-bold text-[#0f294a]">${d}</span>
+                  <span class="text-xs px-2 py-0.5 rounded bg-[#e8f0fe] text-[#0f294a] font-semibold">${hrs.length} 档 · ${coins.toFixed(1)} 币</span>
+                </div>
+                <div class="text-xs text-[#5a6b82] truncate mt-0.5">${label}</div>
+              </div>
+              <button class="btn-navy px-2.5 py-1 text-xs shrink-0" onclick="onSchDateChange('${d}')">查看/修改</button>
+            </div>
+          `;
+        });
+        html += `</div>`;
+      }
+
+      html += `</div>
+
+        <!-- 排档参数设置 -->
+        <div class="navy-card p-4 sm:p-5">
+          <h3 class="text-sm font-bold text-[#0f294a] mb-3">排档设置</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs text-[#5a6b82] mb-1">营业时间开始</label>
+              <input type="time" id="schStartInput" class="input-navy" value="${v.openStart}">
+            </div>
+            <div>
+              <label class="block text-xs text-[#5a6b82] mb-1">营业时间结束</label>
+              <input type="time" id="schEndInput" class="input-navy" value="${v.openEnd}">
+            </div>
+            <div>
+              <label class="block text-xs text-[#5a6b82] mb-1">每档金币</label>
+              <input type="number" min="0" id="schCoinInput" class="input-navy" value="${v.scheduleCoinPer}">
+            </div>
+          </div>
+          <div class="mt-3 flex justify-end">
+            <button class="btn-navy btn-navy-primary px-4 py-1.5 text-xs" onclick="saveSchSetting()">保存设置</button>
+          </div>
+        </div>
+      `;
+
+      return html;
+    }
+
+    function onSchDateChange(newDate) {
+      if (!newDate) return;
+      selectedScheduleDate = newDate;
+      renderVenue();
+    }
+
+    function toggleSchSlot(key, hh) {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      const d = selectedScheduleDate;
+      let rec = v.scheduleList.find(x => x.key === key && x.date === d);
+      if (!rec) {
+        v.scheduleList.push({ key, date: d, hour: hh, checked: true });
+      } else {
+        rec.checked = !rec.checked;
+      }
+      save();
+      renderVenue();
+    }
+
+    function batchSchSlots(checkedVal) {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      const d = selectedScheduleDate;
+      const hours = getOperatingHours(v.openStart, v.openEnd);
+      hours.forEach(hh => {
+        const key = `${d}-${hh}`;
+        const rec = v.scheduleList.find(x => x.key === key && x.date === d);
+        if (!rec) {
+          if (checkedVal) v.scheduleList.push({ key, date: d, hour: hh, checked: true });
+        } else {
+          rec.checked = checkedVal;
+        }
+      });
+      save();
+      renderVenue();
+      showToast(checkedVal ? '已全选当日排档' : '已清空当日排档', 'info');
+    }
+
+    function saveSchSetting() {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      v.openStart = document.getElementById('schStartInput').value || '20:00';
+      v.openEnd = document.getElementById('schEndInput').value || '02:00';
+      v.scheduleCoinPer = Math.max(0, Number(document.getElementById('schCoinInput').value) || 0);
+      save();
+      renderVenue();
+      showToast('排档设置已保存', 'success');
+    }
+
+    /**
+     * 主持记录页（核心改造）：
+     * 像排档一样按小时格点选打卡（每格 1 小时 * hostCoinPerHour），严格按自然日历日期归属，
+     * 同时提供可折叠的备用“自定义起止时间/时长”入口。
+     */
+    function renderHostTab(v) {
+      const today = getTodayDateStr();
+      const isToday = selectedHostDate === today;
+      const hostPrice = Number(v.hostCoinPerHour) || 0;
+
+      // 可选小时格列表：默认全天 00:00~23:00，也可切换仅看场地营业时段
+      const displayHours = hostHoursOnlyOperating
+        ? getOperatingHours(v.openStart, v.openEnd)
+        : Array.from({ length: 24 }, (_, i) => i);
+
+      // 当前选中日期下，按小时格打卡的记录（type === 'slot'）
+      const daySlotRecords = v.hostList.filter(x => x.date === selectedHostDate && x.type === 'slot');
+      const daySlotHours = daySlotRecords.length;
+      const daySlotCoins = daySlotHours * hostPrice;
+
+      // 当前选中日期所有主持记录（含小时格 + 自定义时长）的总小时与总金币
+      const dayAllHost = v.hostList.filter(x => x.date === selectedHostDate);
+      const dayAllHours = dayAllHost.reduce((sum, item) => sum + getHostRecordHours(item), 0);
+      const dayAllCoins = dayAllHours * hostPrice;
+
+      let html = `
+        <!-- 主持小时格打卡主卡片 -->
+        <div class="navy-card p-4 sm:p-5 mb-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 mb-3 border-b border-[#e6edf6]">
+            <div>
+              <h3 class="text-base font-bold text-[#0f294a]">${isToday ? '今日主持小时打卡' : '指定日期主持小时打卡'}</h3>
+              <p class="text-xs text-[#5a6b82]">点选小时格子即计 1 小时（${hostPrice} 金币/h）· 严格按自然日历日期归属</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <input type="date" class="input-navy !w-auto text-xs py-1.5" value="${selectedHostDate}" onchange="onHostDateChange(this.value)">
+              ${!isToday ? `<button class="btn-navy px-2.5 py-1.5 text-xs whitespace-nowrap" onclick="onHostDateChange('${today}')">今天</button>` : ''}
+            </div>
+          </div>
+
+          <!-- 范围切换与当日汇总条 -->
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs bg-[#f4f7fb] border border-[#dce4ef] px-3 py-2 rounded-lg mb-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span>日期：<strong class="text-[#0f294a]">${selectedHostDate}</strong></span>
+              <span class="text-[#cbd6e6]">|</span>
+              <span>本日本日格子：<strong class="text-[#0f294a]">${daySlotHours}h</strong> (${daySlotCoins.toFixed(1)}币)</span>
+              ${dayAllHours !== daySlotHours ? `<span class="text-[#2563eb]">· 当日含自定义共 ${dayAllHours.toFixed(1)}h (${dayAllCoins.toFixed(1)}币)</span>` : ''}
+            </div>
+            <button class="btn-navy px-2.5 py-1 text-[11px]" onclick="toggleHostHourScope()">
+              ${hostHoursOnlyOperating ? '切换为全天 24 小时格' : '仅看营业时段格子'}
+            </button>
+          </div>
+
+          <!-- 24小时/营业时段打卡网格 -->
+          <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 my-3">
+      `;
+
+      displayHours.forEach(hh => {
+        const slotRec = v.hostList.find(x => x.date === selectedHostDate && x.type === 'slot' && x.hour === hh);
+        const checked = Boolean(slotRec);
+        const nextHh = (hh + 1) % 24;
+
+        html += `
+          <div class="slot-box ${checked ? 'checked' : ''}" onclick="toggleHostHourSlot(${hh})">
+            <div class="text-sm font-semibold">${String(hh).padStart(2, '0')}:00</div>
+            <div class="slot-sub text-[10px] text-[#5a6b82] mt-0.5">${checked ? '✓ 1小时' : `${String(hh).padStart(2, '0')}-${String(nextHh).padStart(2, '0')}时`}</div>
+          </div>
+        `;
+      });
+
+      html += `
+          </div>
+
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#e6edf6]">
+            <button class="btn-navy px-3 py-1.5 text-xs" onclick="toggleCustomHostForm()">
+              ${showCustomHostForm ? '收起自定义时长表单' : '⊕ 备用：自定义起止时间 / 非整小时'}
+            </button>
+            <div class="flex gap-2">
+              <button class="btn-navy px-3 py-1.5 text-xs" onclick="batchHostSlots(true)">全选当前格子</button>
+              <button class="btn-navy px-3 py-1.5 text-xs" onclick="batchHostSlots(false)">清空当日格子</button>
+            </div>
+          </div>
+
+          <!-- 可折叠备用的自定义起止时间表单 -->
+          ${showCustomHostForm ? `
+            <div class="mt-4 pt-4 border-t border-dashed border-[#c7d4e6] bg-[#f9fbfe] p-3.5 rounded-xl">
+              <div class="text-xs font-bold text-[#1e3a5f] mb-2.5">自定义主持时段（归属日期：${selectedHostDate}）</div>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-2.5">
+                <div>
+                  <label class="block text-[11px] text-[#5a6b82] mb-1">开始时间</label>
+                  <input type="time" id="customHostStart" class="input-navy text-xs py-1.5" value="21:00">
+                </div>
+                <div>
+                  <label class="block text-[11px] text-[#5a6b82] mb-1">结束时间</label>
+                  <input type="time" id="customHostEnd" class="input-navy text-xs py-1.5" value="21:30">
+                </div>
+                <div>
+                  <label class="block text-[11px] text-[#5a6b82] mb-1">备注</label>
+                  <input type="text" id="customHostNote" class="input-navy text-xs py-1.5" placeholder="例如：半小时补场">
+                </div>
+              </div>
+              <div class="flex justify-end">
+                <button class="btn-navy btn-navy-primary px-3.5 py-1.5 text-xs" onclick="addCustomHostRecord()">添加自定义时长</button>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+
+        <!-- 主持记录明细列表 -->
+        <div class="navy-card p-4 sm:p-5 mb-4">
+          <h3 class="text-sm font-bold text-[#0f294a] mb-3">主持记录明细 (${v.hostList.length} 条)</h3>
+      `;
+
+      if (v.hostList.length === 0) {
+        html += `<p class="text-xs text-[#5a6b82] text-center py-5">暂无主持记录，点击上方小时格即可打卡</p>`;
+      } else {
+        html += `<div class="divide-y divide-[#e6edf6]">`;
+        v.hostList.slice().reverse().forEach(h => {
+          const hrs = getHostRecordHours(h);
+          const coins = hrs * hostPrice;
+          let timeTag = '';
+          if (h.type === 'slot' && typeof h.hour === 'number') {
+            const nextH = (h.hour + 1) % 24;
+            timeTag = `${String(h.hour).padStart(2, '0')}:00~${String(nextH).padStart(2, '0')}:00 (小时格)`;
+          } else {
+            const sStr = h.startTime ? h.startTime.slice(11, 16) : '';
+            const eStr = h.endTime ? h.endTime.slice(11, 16) : '';
+            timeTag = sStr && eStr ? `${sStr}~${eStr}` : '自定义时长';
+          }
+
+          html += `
+            <div class="py-2.5 flex items-center justify-between gap-2">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-sm font-bold text-[#0f294a]">${h.date}</span>
+                  <span class="text-xs px-2 py-0.5 rounded bg-[#f4f7fb] border border-[#dce4ef] text-[#1e3a5f]">${timeTag}</span>
+                  <span class="text-xs font-semibold text-[#2563eb]">${hrs.toFixed(2)}h · ${coins.toFixed(1)} 金币</span>
+                </div>
+                ${h.note ? `<div class="text-xs text-[#5a6b82] mt-0.5">${escapeHtml(h.note)}</div>` : ''}
+              </div>
+              <button class="btn-navy btn-navy-danger px-2.5 py-1 text-xs shrink-0" onclick="delHostRecord('${h.id}')">删除</button>
+            </div>
+          `;
+        });
+        html += `</div>`;
+      }
+
+      html += `</div>
+
+        <!-- 主持时薪设置 -->
+        <div class="navy-card p-4 sm:p-5">
+          <h3 class="text-sm font-bold text-[#0f294a] mb-3">主持设置</h3>
+          <div class="flex items-end gap-3">
+            <div class="flex-1 max-w-xs">
+              <label class="block text-xs text-[#5a6b82] mb-1">主持每小时金币</label>
+              <input type="number" min="0" id="hostCoinInput" class="input-navy" value="${v.hostCoinPerHour}">
+            </div>
+            <button class="btn-navy btn-navy-primary px-4 py-1.5 text-xs" onclick="saveHostSetting()">保存</button>
+          </div>
+        </div>
+      `;
+
+      return html;
+    }
+
+    function onHostDateChange(newDate) {
+      if (!newDate) return;
+      selectedHostDate = newDate;
+      renderVenue();
+    }
+
+    function toggleHostHourScope() {
+      hostHoursOnlyOperating = !hostHoursOnlyOperating;
+      renderVenue();
+    }
+
+    function toggleCustomHostForm() {
+      showCustomHostForm = !showCustomHostForm;
+      renderVenue();
+    }
+
+    // 点选或取消某个自然日历日期下的 1 小时格子
+    function toggleHostHourSlot(hh) {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      const d = selectedHostDate;
+      const idx = v.hostList.findIndex(x => x.date === d && x.type === 'slot' && x.hour === hh);
+      if (idx >= 0) {
+        v.hostList.splice(idx, 1);
+      } else {
+        const nextHh = (hh + 1) % 24;
+        v.hostList.push({
+          id: uuid(),
+          date: d,
+          type: 'slot',
+          hour: hh,
+          hours: 1,
+          startTime: `${d}T${String(hh).padStart(2, '0')}:00`,
+          endTime: `${d}T${String(nextHh).padStart(2, '0')}:00`,
+          note: ''
+        });
+      }
+      save();
+      renderVenue();
+    }
+
+    // 全选或清空当前展示范围的小时格
+    function batchHostSlots(enable) {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      const d = selectedHostDate;
+      const scopeHours = hostHoursOnlyOperating
+        ? getOperatingHours(v.openStart, v.openEnd)
+        : Array.from({ length: 24 }, (_, i) => i);
+
+      if (enable) {
+        scopeHours.forEach(hh => {
+          const exists = v.hostList.some(x => x.date === d && x.type === 'slot' && x.hour === hh);
+          if (!exists) {
+            const nextHh = (hh + 1) % 24;
+            v.hostList.push({
+              id: uuid(),
+              date: d,
+              type: 'slot',
+              hour: hh,
+              hours: 1,
+              startTime: `${d}T${String(hh).padStart(2, '0')}:00`,
+              endTime: `${d}T${String(nextHh).padStart(2, '0')}:00`,
+              note: ''
+            });
+          }
+        });
+        showToast('已勾选当前主持时段格子', 'info');
+      } else {
+        v.hostList = v.hostList.filter(x => !(x.date === d && x.type === 'slot' && scopeHours.includes(x.hour)));
+        showToast('已清空当前主持小时格', 'info');
+      }
+      save();
+      renderVenue();
+    }
+
+    // 备用：添加自定义时段时长记录
+    function addCustomHostRecord() {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      const stTime = document.getElementById('customHostStart').value;
+      const etTime = document.getElementById('customHostEnd').value;
+      const note = document.getElementById('customHostNote').value.trim();
+
+      if (!stTime || !etTime) {
+        showToast('请填写开始和结束时间', 'error');
+        return;
+      }
+
+      const [sh, sm] = stTime.split(':').map(Number);
+      const [eh, em] = etTime.split(':').map(Number);
+      const diffHours = ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+
+      if (diffHours <= 0) {
+        showToast('结束时间需晚于开始时间（同日内）', 'error');
+        return;
+      }
+
+      const d = selectedHostDate;
+      v.hostList.push({
+        id: uuid(),
+        date: d,
+        type: 'custom',
+        hours: diffHours,
+        startTime: `${d}T${stTime}`,
+        endTime: `${d}T${etTime}`,
+        note
+      });
+      save();
+      renderVenue();
+      showToast(`已添加自定义主持 ${diffHours.toFixed(2)} 小时`, 'success');
+    }
+
+    function delHostRecord(id) {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      v.hostList = v.hostList.filter(x => x.id !== id);
+      save();
+      renderVenue();
+      showToast('已删除主持记录', 'info');
+    }
+
+    function saveHostSetting() {
+      const v = data.venues.find(x => x.id === currentVenueId);
+      if (!v) return;
+      v.hostCoinPerHour = Math.max(0, Number(document.getElementById('hostCoinInput').value) || 0);
+      save();
+      renderVenue();
+      showToast('主持时薪已保存', 'success');
+    }
+
+    /**
+     * =========================================================
+     * 6. 备份导出与导入校验
+     * =========================================================
+     */
+    function exportBackup() {
+      try {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `排档主持记录备份_${getTodayDateStr()}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast('备份文件已导出', 'success');
+      } catch (e) {
+        showToast('导出失败', 'error');
+      }
+    }
+
+    function importBackup() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json,application/json';
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const parsed = JSON.parse(ev.target.result);
+            if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.venues)) {
+              throw new Error('缺少 venues 数组');
+            }
+            if (!parsed.global || typeof parsed.global.usdToMyr !== 'number' || isNaN(parsed.global.usdToMyr)) {
+              parsed.global = { usdToMyr: 4.6 };
+            }
+            parsed.venues.forEach(v => {
+              if (!v.id) v.id = uuid();
+              if (!v.name) v.name = '未命名场地';
+              if (!PLATFORM_RULE[v.platform]) v.platform = 'miya';
+              if (!Array.isArray(v.scheduleList)) v.scheduleList = [];
+              if (!Array.isArray(v.hostList)) v.hostList = [];
+            });
+
+            data = parsed;
+            save();
+            renderHome();
+            showToast(`已导入 ${data.venues.length} 个场地数据`, 'success');
+          } catch (err) {
+            console.error('导入校验失败:', err);
+            showToast('导入失败：JSON 数据结构不合法', 'error');
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    }
+
+    // 初始渲染首页
+    renderHome();
+  </script>
+</body>
+</html>
